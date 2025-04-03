@@ -1,0 +1,99 @@
+import pandas as pd
+import numpy as np
+import re
+import requests
+import zipfile
+import io
+import nltk
+import matplotlib.pyplot as plt
+from nltk.corpus import stopwords
+from sklearn.model_selection import train_test_split
+from sklearn.feature_extraction.text import TfidfVectorizer
+from sklearn.naive_bayes import MultinomialNB
+from sklearn.metrics import accuracy_score, classification_report
+
+# Download NLTK stopwords
+nltk.download('stopwords')
+
+# Step 1: Download and Extract Dataset
+dataset_url = "http://cs.stanford.edu/people/alecmgo/trainingandtestdata.zip"
+print("Downloading dataset...")
+response = requests.get(dataset_url)
+
+# Extract ZIP file
+print("Extracting dataset...")
+with zipfile.ZipFile(io.BytesIO(response.content), "r") as zip_ref:
+    zip_ref.extractall(".")
+
+# Step 2: Load Dataset
+csv_file = "training.1600000.processed.noemoticon.csv"
+print(f"Loading {csv_file}...")
+
+# Load data into Pandas DataFrame
+df = pd.read_csv(csv_file, encoding="latin-1", header=None)
+
+# Assign column names
+df.columns = ["sentiment", "id", "date", "query", "user", "text"]
+
+# Keep only sentiment and text columns
+df = df[["sentiment", "text"]]
+
+# Convert sentiment labels (0 = negative, 2 = neutral, 4 = positive)
+df["sentiment"] = df["sentiment"].map({0: "negative", 2: "neutral", 4: "positive"})
+
+# Reduce dataset size for faster training (Optional: use full dataset for better accuracy)
+df = df.sample(n=50000, random_state=42)  # Use 50,000 samples instead of 1.6M
+
+# Show dataset summary
+print("Dataset Loaded Successfully!")
+print(df.head())
+
+# Step 3: Preprocess Text Data
+def clean_text(text):
+    text = text.lower()  # Convert to lowercase
+    text = re.sub(r"http\S+|www\S+|https\S+", '', text, flags=re.MULTILINE)  # Remove URLs
+    text = re.sub(r'\@\w+|\#','', text)  # Remove mentions and hashtags
+    text = re.sub(r"[^\w\s]", "", text)  # Remove special characters
+    text = " ".join([word for word in text.split() if word not in stopwords.words("english")])  # Remove stopwords
+    return text
+
+# Apply text cleaning
+print("Cleaning tweets...")
+df["cleaned_text"] = df["text"].apply(clean_text)
+
+# Step 4: Convert Text to Numerical Features (TF-IDF)
+vectorizer = TfidfVectorizer(max_features=5000)
+X = vectorizer.fit_transform(df["cleaned_text"])
+y = df["sentiment"]
+
+# Step 5: Split Data into Train & Test Sets
+X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42)
+
+# Step 6: Train the Sentiment Classifier
+print("Training Sentiment Model...")
+model = MultinomialNB()
+model.fit(X_train, y_train)
+
+# Step 7: Evaluate Model
+print("Evaluating Model...")
+y_pred = model.predict(X_test)
+print("Accuracy:", accuracy_score(y_test, y_pred))
+print(classification_report(y_test, y_pred))
+
+# Step 8: Function to Predict Sentiment of Custom Tweets
+def predict_sentiment(tweet):
+    cleaned_tweet = clean_text(tweet)
+    transformed_tweet = vectorizer.transform([cleaned_tweet])
+    sentiment = model.predict(transformed_tweet)[0]
+    return sentiment
+
+# Step 9: Test the Model with a Custom Tweet
+test_tweet = "I love this product! It's absolutely amazing 😍"
+print("\nTest Tweet Sentiment:", predict_sentiment(test_tweet))
+
+# Step 10: Visualize Sentiment Distribution
+df["sentiment"].value_counts().plot(kind="bar", color=["red", "blue", "green"])
+plt.title("Sentiment Distribution")
+plt.xlabel("Sentiment")
+plt.ylabel("Count")
+plt.show()
